@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON
-from db.base import Base
+from math_microservice.db.base import Base
 import datetime
 
 class RequestLog(Base):
