@@ -12,6 +12,3 @@ class Settings(BaseSettings):
 
 # a single, importable settings instance
 settings = Settings()
-
-# DEBUG: make sure .env is loading the container URL
-print("▶ FastAPI will connect to:", settings.DATABASE_URL)
