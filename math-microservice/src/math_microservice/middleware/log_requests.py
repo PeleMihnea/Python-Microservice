@@ -7,6 +7,10 @@ from sqlalchemy.orm import sessionmaker
 from ..models.request_log import RequestLog
 from ..core.config import settings
 
+from starlette.responses import Response as StarletteResponse
+from starlette.types import Message
+import json
+
 # build your engine with a sane pool timeout
 engine = create_async_engine(
     settings.DATABASE_URL,
@@ -35,18 +39,40 @@ async def log_requests_middleware(request: Request, call_next):
     except Exception:
         body = {}
 
-    # 2. call the real handler
-    response: Response = await call_next(request)
+    response_body_chunks = []
 
-    # 3. capture JSON response-body safely
+    async def receive_with_buffering() -> Message:
+        # Clone the request stream to avoid consuming it
+        body_bytes = await request.body()
+        return {"type": "http.request", "body": body_bytes, "more_body": False}
+
+    request = Request(request.scope, receive=receive_with_buffering)
+
+    # Intercept the response and buffer it
+    original_response = await call_next(request)
+    async for chunk in original_response.body_iterator:
+        response_body_chunks.append(chunk)
+
+    # Join all chunks into a single body
+    full_body = b"".join(response_body_chunks)
+
     try:
-        resp = response.body()
+        resp_json = json.loads(full_body.decode())
     except Exception:
-        resp = {}
+        resp_json = {}
+
+    # 3. Recreate the response object (so it can still be sent to the client)
+    response = StarletteResponse(
+        content=full_body,
+        status_code=original_response.status_code,
+        headers=dict(original_response.headers),
+        media_type=original_response.media_type
+    )
+
 
     # 4. schedule *your* save_request_log (which makes its own session)
     background = BackgroundTasks()
-    background.add_task(save_request_log, request.url.path, body, resp)
+    background.add_task(save_request_log, request.url.path, body, resp_json)
     response.background = background
 
     return response
